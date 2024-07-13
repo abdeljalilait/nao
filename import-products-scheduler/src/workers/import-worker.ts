@@ -7,7 +7,10 @@ import { randomBytes } from 'crypto';
 import { unlink } from 'fs/promises';
 import type { Product } from '../interfaces';
 import { downloadCSV, processRowData } from './helpers';
-export const BATCH_SIZE = 1000; // Adjust based on your needs
+import { enhanceProductDescription } from '../openai';
+
+export const BATCH_SIZE = 5000; // Adjust based on your needs
+
 // MongoDB connection URI
 const uri = `mongodb://${process.env.MONGODB_USER}:${process.env.MONGODB_PASSWORD}@localhost:27017/nao-db`;
 /**
@@ -43,6 +46,7 @@ export default async function importWorker(job: Job<VendorType>) {
     await downloadCSV(csvUrl, tempFilePath);
 
     let products: Product[] = [];
+    const collection = client.db('nao-db').collection<Product>('products');
     // Read CSV file with Danfo.js
     await dfd.streamCSV(tempFilePath, async (df) => {
       /**
@@ -63,10 +67,6 @@ export default async function importWorker(job: Job<VendorType>) {
           try {
             products.push(json[0]);
             if (products.length >= BATCH_SIZE) {
-              // insertion logic here
-              const collection = client
-                .db('nao-db')
-                .collection<Product>('products');
               const bulkOps = products.map((product) => ({
                 updateOne: {
                   filter: { docId: product.docId },
@@ -75,6 +75,7 @@ export default async function importWorker(job: Job<VendorType>) {
                 },
               }));
               await collection.bulkWrite(bulkOps);
+              //If a product that is deleted has orders, do not actually delete it from the database. Instead, mark it as inactive or deleted.
               console.log(`Inserted ${products.length} rows.`);
               products = [];
             }
@@ -84,10 +85,53 @@ export default async function importWorker(job: Job<VendorType>) {
         }
       }
     });
+    /**
+     * Processes products with empty descriptions in the MongoDB database.
+     * This code block iterates over all products in the 'products' collection where the 'data.description' field is empty, and logs each product to the console. You can add your own processing logic for these products within the loop.
+     */
+    const cursor = collection
+      .find({
+        $or: [
+          { 'data.description': { $exists: false } },
+          { 'data.description': '' },
+        ],
+      })
+      .batchSize(10); // Set cursor batch size
+
+    let batch = [];
+    for await (const doc of cursor) {
+      // Prepare enhanced description
+      const enhancedDescriptionPromise = enhanceProductDescription({
+        description: doc.data.description || '',
+        name: doc.data.name,
+        nameOfCategory: doc.data.categoryId,
+      }).then((enhancedDescription) => {
+        return {
+          updateOne: {
+            filter: { _id: doc._id },
+            update: { $set: { 'data.description': enhancedDescription } },
+          },
+        };
+      });
+
+      batch.push(enhancedDescriptionPromise);
+
+      // Execute batch update when the batch size is reached
+      if (batch.length >= 10) {
+        const operations = await Promise.all(batch);
+        await collection.bulkWrite(operations);
+        batch = []; // Reset batch
+      }
+    }
+
+    // Process any remaining updates in the batch
+    if (batch.length > 0) {
+      const operations = await Promise.all(batch);
+      await collection.bulkWrite(operations);
+    }
     console.log('done');
+    await unlink(tempFilePath); // Delete the temporary file
     // Close the connection to the MongoDB database
-    await unlink(tempFilePath);
-    // Convert DataFrame to JSON
     await client.close(true);
     return Promise.resolve(true);
   } catch (err) {
