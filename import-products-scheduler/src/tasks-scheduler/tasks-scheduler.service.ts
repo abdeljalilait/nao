@@ -15,7 +15,7 @@ export class TasksSchedulerService {
   constructor(
     @InjectQueue(VENDORS_QUEUE) private vendorsQueue: Queue<VendorType>,
   ) {}
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async handleImportVendorsScheduler() {
     await this.vendorsQueue.addBulk(
       vendorsArray.map((vendor) => ({
