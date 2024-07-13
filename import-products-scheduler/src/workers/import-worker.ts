@@ -6,7 +6,7 @@ import { MongoClient } from 'mongodb';
 import { randomBytes } from 'crypto';
 import { unlink } from 'fs/promises';
 import type { Product } from '../interfaces';
-import { downloadCSV, processRowData } from './helpers';
+import { downloadCSV, logger, processRowData } from './helpers';
 import { enhanceProductDescription } from '../openai';
 
 export const BATCH_SIZE = 5000; // Adjust based on your needs
@@ -48,43 +48,47 @@ export default async function importWorker(job: Job<VendorType>) {
     let products: Product[] = [];
     const collection = client.db('nao-db').collection<Product>('products');
     // Read CSV file with Danfo.js
-    await dfd.streamCSV(tempFilePath, async (df) => {
-      /**
-       * Processes the CSV data row by row and inserts the product data into the MongoDB database in batches.
-       *
-       * This code block is responsible for the following:
-       * 1. Converts the current row of the CSV data to a JSON object.
-       * 2. Processes the row data using the `processRowData` function.
-       * 3. Adds the processed product data to the `products` array.
-       * 4. When the `products` array reaches the `BATCH_SIZE` limit, it inserts the batch of products into the MongoDB database using a bulk write operation.
-       * 5. Resets the `products` array to an empty array after the batch is inserted.
-       */
-      if (df) {
-        const json = dfd.toJSON(df);
-        const row = json[0];
-        if (row) {
-          products.push(processRowData(row));
-          try {
-            products.push(json[0]);
-            if (products.length >= BATCH_SIZE) {
-              const bulkOps = products.map((product) => ({
-                updateOne: {
-                  filter: { docId: product.docId },
-                  update: { $set: product },
-                  upsert: true,
-                },
-              }));
-              await collection.bulkWrite(bulkOps);
-              //If a product that is deleted has orders, do not actually delete it from the database. Instead, mark it as inactive or deleted.
-              console.log(`Inserted ${products.length} rows.`);
-              products = [];
+    await dfd.streamCSV(
+      tempFilePath,
+      async (df) => {
+        /**
+         * Processes the CSV data row by row and inserts the product data into the MongoDB database in batches.
+         *
+         * This code block is responsible for the following:
+         * 1. Converts the current row of the CSV data to a JSON object.
+         * 2. Processes the row data using the `processRowData` function.
+         * 3. Adds the processed product data to the `products` array.
+         * 4. When the `products` array reaches the `BATCH_SIZE` limit, it inserts the batch of products into the MongoDB database using a bulk write operation.
+         * 5. Resets the `products` array to an empty array after the batch is inserted.
+         */
+        if (df) {
+          const json = dfd.toJSON(df);
+          const row = json[0];
+          if (row) {
+            products.push(processRowData(row));
+            try {
+              products.push(json[0]);
+              if (products.length >= BATCH_SIZE) {
+                const bulkOps = products.map((product) => ({
+                  updateOne: {
+                    filter: { docId: product.docId },
+                    update: { $set: product },
+                    upsert: true,
+                  },
+                }));
+                await collection.bulkWrite(bulkOps);
+                //If a product that is deleted has orders, do not actually delete it from the database. Instead, mark it as inactive or deleted.
+                console.log(`Inserted ${products.length} rows.`);
+                products = [];
+              }
+            } catch (error) {
+              console.error('Error inserting batch:', error);
             }
-          } catch (error) {
-            console.error('Error inserting batch:', error);
           }
         }
-      }
-    });
+      },
+      { frameConfig: { config: { lowMemoryMode: true } } },
+    );
     /**
      * Processes products with empty descriptions in the MongoDB database.
      * This code block iterates over all products in the 'products' collection where the 'data.description' field is empty, and logs each product to the console. You can add your own processing logic for these products within the loop.
@@ -136,7 +140,7 @@ export default async function importWorker(job: Job<VendorType>) {
     return Promise.resolve(true);
   } catch (err) {
     await client.close(true);
-    console.log(err);
+    logger.error(err);
     return Promise.reject(err);
   }
 }

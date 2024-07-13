@@ -2,6 +2,7 @@ import * as nanoid from 'nanoid';
 import type { Product } from '../interfaces';
 import axios from 'axios';
 import { createWriteStream } from 'fs';
+import winston, { format, transports } from 'winston';
 
 /**
  * Processes a row of data from a CSV file and returns a Product object.
@@ -13,18 +14,18 @@ export function processRowData(row: any): Product {
   const now = new Date().toISOString();
   const productData = {
     name: row['ProductName'],
-    type: 'Medical', // Example fixed type
+    type: 'Medical',
     shortDescription: row['ItemDescription'],
     description: row['ProductDescription'],
     vendorId: row['ManufacturerID'],
     manufacturerId: row['ManufacturerID'],
-    storefrontPriceVisibility: 'Public', // Example fixed value
+    storefrontPriceVisibility: 'Public',
     variants: [],
     options: [],
     availability: row['Availability'],
-    isFragile: false, // Example fixed value
-    published: '2024-07-13', // Example fixed value
-    isTaxable: true, // Example fixed value
+    isFragile: false,
+    published: '2024-07-13',
+    isTaxable: true,
     images: [],
     categoryId: row['CategoryID'],
   };
@@ -37,7 +38,7 @@ export function processRowData(row: any): Product {
       description: row['ProductDescription'],
     },
     cost: parseFloat(row['UnitPrice']),
-    currency: 'USD', // Example fixed value
+    currency: 'USD',
     description: row['ItemDescription'],
     dimensionUom: null,
     height: null,
@@ -125,3 +126,17 @@ export async function downloadCSV(
     writer.on('error', reject);
   });
 }
+
+// Create a Winston logger instance
+export const logger = winston.createLogger({
+  level: 'info', // You can change the log level to 'error', 'warn', etc.
+  format: format.combine(
+    format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    format.printf(
+      ({ timestamp, level, message }) => `${timestamp} ${level}: ${message}`,
+    ),
+  ),
+  transports: [
+    new transports.File({ filename: 'logs/application.log' }), // Logs will be written to this file
+  ],
+});
