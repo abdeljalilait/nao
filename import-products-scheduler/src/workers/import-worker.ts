@@ -1,13 +1,13 @@
-import { Job } from 'bullmq';
-import { VendorType } from 'src/types';
+import type { Job } from 'bullmq';
+import type { VendorType } from 'src/types';
 import * as dfd from 'danfojs-node';
-import axios from 'axios';
-import { createWriteStream } from 'fs';
 import { resolve } from 'path';
 import { MongoClient } from 'mongodb';
 import { randomBytes } from 'crypto';
 import { unlink } from 'fs/promises';
-export const BATCH_SIZE = 5000;
+import type { Product } from '../interfaces';
+import { downloadCSV, processRowData } from './helpers';
+export const BATCH_SIZE = 1000; // Adjust based on your needs
 // MongoDB connection URI
 const uri = `mongodb://${process.env.MONGODB_USER}:${process.env.MONGODB_PASSWORD}@localhost:27017/nao-db`;
 /**
@@ -40,46 +40,43 @@ export default async function importWorker(job: Job<VendorType>) {
       'temp',
       `${randomBytes(16).toString('hex')}.csv`,
     );
-    console.log(tempFilePath);
+    await downloadCSV(csvUrl, tempFilePath);
 
-    // Download the CSV file
-    const response = await axios({
-      method: 'get',
-      url: csvUrl,
-      responseType: 'stream',
-    });
-
-    // Pipe the file content to the temporary file
-    const writer = createWriteStream(tempFilePath);
-    response.data.pipe(writer);
-
-    // Wait for the download to finish
-    await new Promise((resolve, reject) => {
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    let batch = [];
+    let products: Product[] = [];
     // Read CSV file with Danfo.js
     await dfd.streamCSV(tempFilePath, async (df) => {
+      /**
+       * Processes the CSV data row by row and inserts the product data into the MongoDB database in batches.
+       *
+       * This code block is responsible for the following:
+       * 1. Converts the current row of the CSV data to a JSON object.
+       * 2. Processes the row data using the `processRowData` function.
+       * 3. Adds the processed product data to the `products` array.
+       * 4. When the `products` array reaches the `BATCH_SIZE` limit, it inserts the batch of products into the MongoDB database using a bulk write operation.
+       * 5. Resets the `products` array to an empty array after the batch is inserted.
+       */
       if (df) {
-        // processing here
-        /**
-         * Processes a batch of product data from a CSV file and inserts it into a MongoDB database.
-         * This code is responsible for the following steps:
-         * 1. Converts the Danfo.js DataFrame to a JSON array.
-         * 2. Adds the JSON data to a batch array.
-         * 3. When the batch size reaches the configured BATCH_SIZE, it inserts the batch of data.
-         * 4. After the batch is inserted, the batch array is reset to an empty array.
-         */
         const json = dfd.toJSON(df);
-        if (json[0]) {
+        const row = json[0];
+        if (row) {
+          products.push(processRowData(row));
           try {
-            batch.push(json[0]);
-            if (batch.length >= BATCH_SIZE) {
+            products.push(json[0]);
+            if (products.length >= BATCH_SIZE) {
               // insertion logic here
-              console.log(`Inserted ${batch.length} rows.`);
-              batch = [];
+              const collection = client
+                .db('nao-db')
+                .collection<Product>('products');
+              const bulkOps = products.map((product) => ({
+                updateOne: {
+                  filter: { docId: product.docId },
+                  update: { $set: product },
+                  upsert: true,
+                },
+              }));
+              await collection.bulkWrite(bulkOps);
+              console.log(`Inserted ${products.length} rows.`);
+              products = [];
             }
           } catch (error) {
             console.error('Error inserting batch:', error);

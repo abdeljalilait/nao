@@ -81,7 +81,6 @@ interface ProductInfo {
 }
 
 export interface Product {
-  _id: string;
   docId: string;
   fullData: any | null; // 'any' can be replaced with a more specific type if known
   data: ProductData;
