@@ -13,16 +13,19 @@ import { resolve } from 'path';
 export class DownloadController {
   @Get(':vendor')
   downloadFile(@Param('vendor') vendor: string, @Res() res: Response) {
-    const validVendors = ['v1', 'v2'];
+    const validVendors = ['vendor1', 'vendor2'];
+    const fileName = 'images40.csv';
     if (!validVendors.includes(vendor)) {
-      return res.status(400).send('Invalid version parameter');
+      return res.status(400).send('Invalid vendor parameter');
     }
 
-    const filePath = resolve('vendors', vendor, 'images40.csv');
+    const filePath = resolve('vendors', vendor, fileName);
+    console.log('downloadFile: filePath', filePath);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
     res.download(filePath, `data_${vendor}.csv`, (err) => {
       if (err) {
         console.log(err);
-        res.status(500).send('Could not download the file.');
       }
     });
   }

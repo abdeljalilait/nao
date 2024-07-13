@@ -1,14 +1,17 @@
 services:
    redis:
-      hostname: redis
       image: redis:7.0-alpine
+      hostname: redis
       restart: always
       ports:
         - 6379:6379
    database:
+      image: mongo:7.0
       container_name: mongodb
       hostname: database
-      image: mongo:7.0
+      environment:
+        MONGO_INITDB_ROOT_USERNAME: root
+        MONGO_INITDB_ROOT_PASSWORD: your_password
       ports:
           - 27017:27017
       volumes:
