@@ -3,6 +3,12 @@ import type { Product } from '../interfaces';
 import axios from 'axios';
 import { createWriteStream } from 'fs';
 
+/**
+ * Processes a row of data from a CSV file and returns a Product object.
+ *
+ * @param row - An object representing a row of data from the CSV file.
+ * @returns A Product object with the data from the CSV row.
+ */
 export function processRowData(row: any): Product {
   const now = new Date().toISOString();
   const productData = {
