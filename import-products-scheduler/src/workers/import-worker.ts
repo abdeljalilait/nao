@@ -102,6 +102,9 @@ export default async function importWorker(job: Job<VendorType>) {
       })
       .batchSize(10); // Set cursor batch size
 
+    /* this part can be done in seperate process
+     * by pushing products to a queue of description enhacement jobs.
+     */
     let batch = [];
     for await (const doc of cursor) {
       // Prepare enhanced description
