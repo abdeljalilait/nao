@@ -1,0 +1,17 @@
+services:
+   redis:
+      hostname: redis
+      image: redis:7.0-alpine
+      restart: always
+      ports:
+        - 6379:6379
+   database:
+      container_name: mongodb
+      hostname: database
+      image: mongo:7.0
+      ports:
+          - 27017:27017
+      volumes:
+        - mongo-db:/data/db
+volumes:
+  mongo-db:
